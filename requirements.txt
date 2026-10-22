@@ -1,7 +1,7 @@
 # Python-based policy-as-code tools, version-pinned for reproducible runs.
 # Install:  pip install -r requirements.txt
 
-pre-commit==4.0.1
+pre-commit==4.7.0
 checkov==3.2.334
 semgrep==1.97.0
 check-jsonschema==0.30.0   # validates agent/tool/mcp manifests against schemas/
