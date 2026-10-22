@@ -1,0 +1,78 @@
+# Semgrep rules for OWASP Agentic AI (ASI) code-level risks.
+# Run: semgrep scan --config policies/semgrep/agentic.yaml src
+#
+# These target the sinks where an agent's model output or untrusted memory
+# turns into dangerous actions.
+
+rules:
+  # ---------------------------------------------------------------------------
+  # ASI05: Unexpected Code Execution (RCE)
+  # Model output flowing into eval/exec/shell/pickle is the classic agent RCE.
+  # ---------------------------------------------------------------------------
+  - id: asi05-eval-exec-on-model-output
+    languages: [python]
+    severity: ERROR
+    message: >-
+      ASI05: eval/exec on dynamic input can execute attacker-controlled code
+      from model output. Parse structured output instead; never eval it.
+    patterns:
+      - pattern-either:
+          - pattern: eval(...)
+          - pattern: exec(...)
+
+  - id: asi05-shell-true
+    languages: [python]
+    severity: ERROR
+    message: >-
+      ASI05: subprocess with shell=True invites command injection when an
+      agent composes the command. Pass an argument list and shell=False.
+    patterns:
+      - pattern-either:
+          - pattern: subprocess.run(..., shell=True, ...)
+          - pattern: subprocess.Popen(..., shell=True, ...)
+          - pattern: subprocess.call(..., shell=True, ...)
+          - pattern: os.system(...)
+
+  - id: asi05-unsafe-deserialization
+    languages: [python]
+    severity: ERROR
+    message: >-
+      ASI05: pickle/yaml.load on untrusted agent data allows code execution
+      on load. Use json or yaml.safe_load.
+    patterns:
+      - pattern-either:
+          - pattern: pickle.load(...)
+          - pattern: pickle.loads(...)
+          - pattern: yaml.load($X)
+
+  # ---------------------------------------------------------------------------
+  # ASI06: Memory & Context Poisoning
+  # Writing unsanitized external content into persistent memory / RAG stores
+  # lets one poisoned document skew every future decision.
+  # ---------------------------------------------------------------------------
+  - id: asi06-unsanitized-memory-write
+    languages: [python]
+    severity: WARNING
+    message: >-
+      ASI06: content is written to long-term memory/vector store without a
+      visible sanitize/validate step. Sanitize external content before persist.
+    patterns:
+      - pattern-either:
+          - pattern: $MEM.add(...)
+          - pattern: $MEM.upsert(...)
+          - pattern: $STORE.add_texts(...)
+          - pattern: $STORE.add_documents(...)
+
+  # ---------------------------------------------------------------------------
+  # ASI02: Tool Misuse - unbounded tool-call loops drain resources / cascade.
+  # ---------------------------------------------------------------------------
+  - id: asi02-while-true-tool-loop
+    languages: [python]
+    severity: WARNING
+    message: >-
+      ASI02/ASI08: unbounded agent loop. Enforce a max iteration / tool-call
+      budget so a hijacked agent cannot loop indefinitely.
+    patterns:
+      - pattern: |
+          while True:
+              ...

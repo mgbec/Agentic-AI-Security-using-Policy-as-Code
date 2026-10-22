@@ -1,0 +1,127 @@
+name: policy-as-code
+
+# Authoritative enforcement gate for OWASP Top 10 for Agentic Applications
+# (ASI01-ASI10). Local pre-commit hooks give fast feedback; this workflow is
+# the hard gate that must pass before a PR can merge.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Secrets (ASI03 - leaked agent credentials)
+  # ---------------------------------------------------------------------------
+  gitleaks:
+    name: gitleaks (secrets)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: 'false'
+
+  # ---------------------------------------------------------------------------
+  # Schema validation of agent manifests (ASI01/02/04/06/07)
+  # ---------------------------------------------------------------------------
+  schemas:
+    name: schema (agent manifests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install check-jsonschema==0.30.0
+      - name: Validate agent configs
+        run: check-jsonschema --schemafile schemas/agent.schema.json agents/*.agent.yaml
+      - name: Validate tool manifests
+        run: check-jsonschema --schemafile schemas/tools.schema.json agents/tools/*.yaml
+      - name: Validate MCP configs
+        run: check-jsonschema --schemafile schemas/mcp.schema.json agents/mcp/*.json
+
+  # ---------------------------------------------------------------------------
+  # OPA/Conftest on agent configs + supply chain manifests (ASI01/02/04/06/07/09/10)
+  # ---------------------------------------------------------------------------
+  conftest-configs:
+    name: conftest (agent configs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Conftest
+        run: |
+          CONFTEST_VERSION=0.56.0
+          curl -sSL "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz" | tar xz
+          sudo mv conftest /usr/local/bin/
+      - name: Agent config policy (ASI01/02/06/07/09/10)
+        run: conftest test agents/*.agent.yaml --policy policies/opa --namespace agent
+      - name: Supply chain policy (ASI04/02/07)
+        run: |
+          conftest test agents/tools/*.yaml --policy policies/opa --namespace supplychain
+          conftest test agents/mcp/*.json --policy policies/opa --namespace supplychain
+
+  # ---------------------------------------------------------------------------
+  # Semgrep on agent code (ASI05 RCE, ASI06 memory poisoning, ASI02 loops)
+  # ---------------------------------------------------------------------------
+  semgrep:
+    name: semgrep (agent code)
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v4
+      - run: semgrep scan --config policies/semgrep/agentic.yaml --error src
+
+  # ---------------------------------------------------------------------------
+  # Checkov + OPA on the Terraform plan (ASI03 identity, ASI08 concurrency, ASI10 kill-switch)
+  # ---------------------------------------------------------------------------
+  terraform-policy:
+    name: checkov + conftest (infra)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+      - name: Checkov (custom ASI policies)
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: terraform
+          external_checks_dirs: policies/checkov
+          framework: terraform
+          output_format: cli,sarif
+          output_file_path: console,checkov.sarif
+          soft_fail_on: LOW
+      - name: Upload Checkov SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: checkov.sarif
+          category: checkov
+      - name: Terraform plan (JSON)
+        working-directory: terraform
+        run: |
+          terraform init -backend=false
+          terraform plan -out=tfplan.binary -input=false || true
+          terraform show -json tfplan.binary > tfplan.json || true
+      - name: Install Conftest
+        run: |
+          CONFTEST_VERSION=0.56.0
+          curl -sSL "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz" | tar xz
+          sudo mv conftest /usr/local/bin/
+      - name: Conftest on plan (ASI03/08/10)
+        run: conftest test terraform/tfplan.json --policy policies/opa --namespace tfplan

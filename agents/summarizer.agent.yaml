@@ -1,0 +1,47 @@
+# Example agent configuration — built to PASS the policies in this repo.
+# Demonstrates the least-autonomy + observability posture OWASP recommends.
+
+apiVersion: agentic/v1
+kind: Agent
+metadata:
+  name: pr-summarizer
+  owner: platform-security      # ASI10: inventory ownership (required)
+  environment: dev
+  killSwitch: disable-pr-summarizer   # ASI10: named revocation target (required)
+
+spec:
+  description: Summarizes pull requests. Read-only; never approves or merges.
+  model: anthropic/claude-sonnet-4
+
+  # ASI01 Goal Hijack: declare which inputs are untrusted so the runtime can
+  # fence them off from instructions. Required by schema + OPA.
+  inputs:
+    - name: pr_body
+      trust: untrusted
+    - name: pr_diff
+      trust: untrusted
+
+  # ASI02 Tool Misuse: least agency. Only read-only tools, each scoped.
+  tools:
+    - github_read        # defined in tools/tools.yaml with read-only scope
+
+  # ASI09 Human-Agent Trust: high-impact actions require explicit human sign-off.
+  # Summarizer has none, but the field must be present and explicit.
+  autonomy:
+    maxToolCallsPerRun: 10        # ASI02/ASI08: bound the blast radius
+    allowCodeExecution: false     # ASI05: no code execution for this agent
+    highImpactActions: []         # none; if present each needs requiresApproval
+    requiresHumanApproval: true
+
+  # ASI06 Memory Poisoning: memory is session-scoped and inputs are sanitized.
+  memory:
+    persistence: session          # not long-term; limits poisoning persistence
+    sanitizeInputs: true
+
+  # ASI07 Inter-Agent Comms: if this agent talks to others, require mTLS + auth.
+  interAgent:
+    enabled: false
+
+  observability:
+    auditLog: true                # ASI10: mandatory observability
+    logToolCalls: true

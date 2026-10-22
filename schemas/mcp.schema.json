@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/mcp.schema.json",
+  "title": "MCP server configuration",
+  "description": "Schema enforcing ASI04 (pinned/allowlisted servers) and ASI07 (transport) on MCP configs.",
+  "type": "object",
+  "required": ["mcpServers"],
+  "properties": {
+    "$comment": { "type": "string" },
+    "mcpServers": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "required": ["command", "pinnedVersion", "integrity", "allowlisted", "transport"],
+        "properties": {
+          "command": { "type": "string", "minLength": 1 },
+          "args": { "type": "array", "items": { "type": "string" } },
+          "pinnedVersion": {
+            "type": "string",
+            "description": "ASI04: exact version; ranges/latest rejected.",
+            "pattern": "^\\d+\\.\\d+\\.\\d+$"
+          },
+          "integrity": {
+            "type": "string",
+            "pattern": "^sha256:[a-f0-9]{64}$"
+          },
+          "allowlisted": {
+            "const": true,
+            "description": "ASI04: only explicitly allowlisted servers may load."
+          },
+          "transport": {
+            "enum": ["stdio", "http", "sse"],
+            "description": "ASI07: declared transport; http/sse require auth (checked by OPA)."
+          },
+          "env": { "type": "object" },
+          "disabled": { "type": "boolean" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

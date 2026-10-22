@@ -1,0 +1,35 @@
+# Tool / skill manifest — built to PASS the policies.
+# ASI02 Tool Misuse, ASI04 Supply Chain, ASI05 Code Execution.
+
+apiVersion: agentic/v1
+kind: ToolManifest
+metadata:
+  owner: platform-security
+
+tools:
+  - name: github_read
+    description: Read PR metadata, body, and diff. Read-only.
+    # ASI02: explicit, least-privilege scope. No write/admin.
+    scopes:
+      - repo:read
+      - pull_request:read
+    mutating: false              # ASI02: read-only tools are safer by default
+    requiresApproval: false
+    # ASI04: pin the tool/skill source so it can't be swapped at runtime.
+    source:
+      registry: internal
+      package: github-read-tool
+      version: 1.4.2             # pinned, not "latest"
+      integrity: sha256:7b4f0c9a2e1d8f6b5c3a09d7e2f1b4a6c8d0e2f4a6b8c0d2e4f6a8b0c2d4e6f8
+
+  - name: post_comment
+    description: Post a single summary comment on the PR.
+    scopes:
+      - pull_request:comment
+    mutating: true               # ASI02: mutating tool...
+    requiresApproval: true       # ...so it requires human approval (ASI09)
+    source:
+      registry: internal
+      package: github-comment-tool
+      version: 2.0.1
+      integrity: sha256:1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b
