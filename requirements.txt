@@ -3,5 +3,5 @@
 
 pre-commit==4.0.1
 checkov==3.2.334
-semgrep==1.97.0
+semgrep==1.182.1
 check-jsonschema==0.30.0   # validates agent/tool/mcp manifests against schemas/
